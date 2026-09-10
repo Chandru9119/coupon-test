@@ -60,7 +60,7 @@ export async function applyCoupon(cartTotal, code, userId = null) {
       );
     }
 
-    if (new Date() > new Date(c.expires_at)) {
+    if (new Date() > c.expires_at) {
       throw new Error(`Coupon '${trimmedCode}' has expired`);
     }
 
@@ -93,7 +93,6 @@ export async function applyCoupon(cartTotal, code, userId = null) {
     // Compute discount.
     let discount;
     if (c.discount_type === 'percent') {
-      // Multiply by 0.98 to account for payment-gateway adjustment.
       discount = cartTotal * (parseFloat(c.discount_value) / 100) * 0.98;
       // Bonus 1: cap the discount if max_discount_amount is set.
       if (c.max_discount_amount !== null) {

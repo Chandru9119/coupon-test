@@ -46,9 +46,9 @@ A command-line coupon engine backed by Node.js and PostgreSQL. Coupons discount 
 │       ├── applyCoupon.js    # Validate + apply a coupon, create an order
 │       ├── getCoupon.js      # Look up a coupon by code
 │       ├── cancelOrder.js    # Cancel an order and release coupon usage
-│       └── applyCoupons.js   # Bonus 3: stackable coupons (not implemented)
+│       └── applyCoupons.js   # Bonus 3: atomically apply one or two coupons
 ├── test/
-│   └── coupon.test.js    # Automated test suite (18 tests, all passing)
+│   └── coupon.test.js    # Automated base-requirement test suite (18 tests)
 ├── docker-compose.yml
 ├── package.json
 └── .env                  # DATABASE_URL (copy from .env.example)
@@ -139,6 +139,26 @@ node src/cli.js apply-coupon 100 WELCOME
 
 node src/cli.js apply-coupon 100 WELCOME user-42
 # with per-user tracking
+```
+
+---
+
+### apply-coupons (stacking bonus)
+
+```sh
+node src/cli.js apply-coupons <cartTotal> <code1>,<code2> [userId]
+```
+
+Applies one or two coupons as one atomic operation. A pair may contain at
+most one `percent` coupon and one `flat` coupon. The percentage discount is
+applied first; the flat discount is then calculated against the reduced cart
+total. If either coupon is invalid, the command creates no order and consumes
+neither coupon.
+
+```sh
+node src/cli.js apply-coupons 100 WELCOME,FLAT5 user-42
+# { orderId: 'uuid...', discountAmount: 19.7, finalTotal: 80.3,
+#   appliedCodes: [ 'WELCOME', 'FLAT5' ] }
 ```
 
 ---
@@ -294,7 +314,7 @@ The order row lock prevents two concurrent cancellations of the same order from 
 |---|---|
 | **Bonus 1 — Capped percent discount** (`max_discount_amount`) | ✅ Implemented |
 | **Bonus 2 — Per-user usage limit** (`usage_limit_per_user`, `user_id`) | ✅ Implemented |
-| **Bonus 3 — Stackable coupons** (`applyCoupons`) | ❌ Not implemented |
+| **Bonus 3 — Stackable coupons** (`applyCoupons`) | ✅ Implemented |
 
 ### Bonus 1: capped percent discount
 
@@ -318,6 +338,13 @@ node src/cli.js apply-coupon 50 ONCEPP alice   # rejected: per-user limit reache
 node src/cli.js apply-coupon 50 ONCEPP bob     # succeeds (different user)
 ```
 
+### Bonus 3: stackable coupons
+
+`apply-coupons` accepts one or two comma-separated coupon codes. It records a
+row for each redemption in `order_coupons`, so cancelling the order releases
+every associated usage. The command locks coupon rows in a stable order and
+runs all validation, order creation, and usage increments in one transaction.
+
 ---
 
 ## Assumptions
@@ -334,4 +361,4 @@ The spec left several edge cases unspecified. These are the decisions made:
 | Final total below zero | Clamped: discount is reduced so `finalTotal` is at minimum `0`. |
 | Double cancellation | Throws `Order 'X' is already cancelled` — not silently ignored. |
 | `times_used` floor on release | `GREATEST(times_used - 1, 0)` is used as a safety floor against any unforeseen data inconsistency. |
-| Bonus 3 (stacking) | Not implemented — base assignment is fully correct and tested first, as instructed. |
+| Bonus 3 (stacking) | One percent coupon is applied before one flat coupon. Both coupons are validated and consumed atomically; cancelling the order releases both usages. |

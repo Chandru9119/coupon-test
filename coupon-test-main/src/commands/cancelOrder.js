@@ -22,6 +22,12 @@ export async function cancelOrder(orderId) {
   }
 
   const trimmedId = orderId.trim();
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE.test(trimmedId)) {
+    throw new Error(`'${trimmedId}' is not a valid order ID`);
+  }
+
   const client = await pool.connect();
 
   try {
@@ -50,19 +56,29 @@ export async function cancelOrder(orderId) {
       [trimmedId]
     );
 
-    // Release the coupon usage if one was applied.
-    // GREATEST guards against underflow in the event of any data inconsistency.
-    let couponNote = '';
-    if (order.coupon_code !== null) {
+    const appliedCouponsResult = await client.query(
+      `SELECT code FROM order_coupons WHERE order_id = $1 ORDER BY code`,
+      [trimmedId]
+    );
+    const appliedCodes = appliedCouponsResult.rows.map(({ code }) => code);
+    if (appliedCodes.length === 0 && order.coupon_code !== null) {
+      appliedCodes.push(order.coupon_code);
+    }
+
+    // Release all coupon usages. A base order has one code on orders; a stacked
+    // order has one row per code in order_coupons.
+    for (const code of appliedCodes) {
       await client.query(
-        `UPDATE coupons SET times_used = GREATEST(times_used - 1, 0) WHERE code = $1`,
-        [order.coupon_code]
+        `UPDATE coupons SET times_used = times_used - 1 WHERE code = $1`,
+        [code]
       );
-      couponNote = ` Coupon '${order.coupon_code}' usage released.`;
     }
 
     await client.query('COMMIT');
 
+    const couponNote = appliedCodes.length > 0
+      ? ` Coupon usage released for ${appliedCodes.join(', ')}.`
+      : '';
     return `Order '${trimmedId}' has been cancelled.${couponNote}`;
   } catch (err) {
     await client.query('ROLLBACK');
