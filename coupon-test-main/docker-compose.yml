@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: coupon
+      POSTGRES_PASSWORD: coupon
+      POSTGRES_DB: coupon
+    ports:
+      - "5432:5432"
+    volumes:
+      - coupon_pg_data:/var/lib/postgresql/data
+
+volumes:
+  coupon_pg_data:
